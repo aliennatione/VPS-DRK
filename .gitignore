@@ -1,0 +1,10 @@
+# File temporanei di Ansible
+*.retry
+.ansible/
+*.vault
+
+# Configurazione locale e sensibile
+.env
+
+# Output dei log scaricati
+vps_diagnostics_output/

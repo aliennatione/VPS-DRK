@@ -1,0 +1,98 @@
+---
+- name: 1. VPS Diagnostica – Acquisizione Log e Stato Disco Non Distruttiva
+  hosts: all # Usa 'all' per operare su qualsiasi host fornito (l'IP dinamico)
+  become: true # Necessario per mount e chroot sul remoto
+
+  vars:
+    # Genera un nome di directory univoco per i log e la sottodirectory locale
+    log_dir_name: "logs_{{ ansible_date_time.iso8601_basic | replace('T', '-') | replace(':', '-') | replace('Z', '') }}"
+    # Percorsi remoti
+    log_dest: "/tmp/{{ log_dir_name }}"
+    tar_file_remote: "/tmp/{{ log_dir_name }}.tar.gz"
+    # Percorso locale (Control Node)
+    local_download_dir: "./vps_diagnostics_output"
+
+  tasks:
+    # 1. SETUP REMOTO E MOUNT (Sola Lettura)
+    - name: Create temporary mount point directory on Live ISO
+      ansible.builtin.file:
+        path: "{{ mount_point }}"
+        state: directory
+        mode: '0755'
+
+    - name: Mount target partition READONLY (Safety Check)
+      ansible.posix.mount:
+        path: "{{ mount_point }}"
+        src: "{{ target_partition }}"
+        fstype: auto
+        opts: ro
+        state: mounted
+
+    - name: Create log destination directory on Live ISO's /tmp
+      ansible.builtin.file:
+        path: "{{ log_dest }}"
+        state: directory
+        mode: '0755'
+
+    # 2. RUN DIAGNOSTICS (Journal, Disk Check, Bind Mounts)
+    - name: Run complex diagnostic steps (Journal, Disk Check, Bind Mounts)
+      ansible.builtin.shell: |
+        set +e
+        mkdir -p "{{ mount_point }}/proc" "{{ mount_point }}/sys"
+        mount -o bind /proc "{{ mount_point }}/proc"
+        mount -o bind /sys "{{ mount_point }}/sys"
+
+        echo "--- LOG JOURNAL (LAST 500) ---" > "{{ log_dest }}/target_journal_last500.txt"
+        chroot "{{ mount_point }}" journalctl -r -n 500 --no-pager >> "{{ log_dest }}/target_journal_last500.txt" 2>&1
+        
+        echo -e "\n--- RAPPORTO UTILIZZO DISCO (df -h) ---" > "{{ log_dest }}/target_disk_usage.txt"
+        chroot "{{ mount_point }}" df -h >> "{{ log_dest }}/target_disk_usage.txt" 2>&1
+
+        cp "{{ mount_point }}/var/log/syslog" "{{ log_dest }}/target_syslog_copy" || true 
+
+        umount "{{ mount_point }}/sys"
+        umount "{{ mount_point }}/proc"
+      args:
+        executable: /bin/bash
+      ignore_errors: yes
+
+    # 3. CLEANUP AND DOWNLOAD (AUTOMAZIONE)
+    - name: Unmount target partition
+      ansible.posix.mount:
+        path: "{{ mount_point }}"
+        state: absent
+
+    - name: Archive log directory before download
+      ansible.builtin.shell: tar czf "{{ tar_file_remote }}" -C /tmp "{{ log_dir_name }}"
+
+    - name: Download log archive to Control Node
+      ansible.builtin.fetch:
+        src: "{{ tar_file_remote }}"
+        dest: "{{ local_download_dir }}/"
+        flat: yes
+      register: fetch_result
+
+    # Task Locale 1: Crea la directory locale di destinazione
+    - name: Ensure local log directory exists
+      ansible.builtin.file:
+        path: "{{ local_download_dir }}/{{ log_dir_name }}"
+        state: directory
+        mode: '0700'
+      delegate_to: localhost
+      become: false
+
+    # Task Locale 2: Estrae l'archivio
+    - name: Extract log archive on Control Node
+      ansible.builtin.unarchive:
+        src: "{{ fetch_result.dest }}"
+        dest: "{{ local_download_dir }}/{{ log_dir_name }}/" 
+        remote_src: no
+        extra_opts:
+          - '--strip-components=1'
+      delegate_to: localhost
+      when: fetch_result.changed
+      become: false 
+
+    - name: Print success message with local download path
+      ansible.builtin.debug:
+        msg: "✅ DIAGNOSTICA COMPLETATA. Log scaricati ed estratti sul Control Node in: {{ local_download_dir }}/{{ log_dir_name }}/{{ inventory_hostname }}/"
