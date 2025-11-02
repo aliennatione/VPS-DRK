@@ -1,9 +1,17 @@
 ---
-- name: 1. VPS Diagnostica – Acquisizione Log e Stato Disco Non Distruttiva
-  hosts: all # Usa 'all' per operare su qualsiasi host fornito (l'IP dinamico)
-  become: true # Necessario per mount e chroot sul remoto
+- name: 1. VPS Diagnostica – Acquisizione Log e Stato Disco Condizionale
+  hosts: all 
+  become: true
 
+  # Imposta la connessione a 'local' se EXECUTION_MODE è LOCAL. Altrimenti usa SSH (default).
   vars:
+    ansible_connection: "{{ 'local' if (EXECUTION_MODE | default('REMOTE')) == 'LOCAL' else omit }}"
+
+    # 🛑 NUOVE VARIABILI DI SETUP ESSENZIALI (Ora definite qui) 🛑
+    mount_point: "/mnt/vps"
+    # ATTENZIONE: target_partition DEVE essere sovrascritta nel comando di esecuzione
+    target_partition: "/dev/vda1" 
+
     # Genera un nome di directory univoco per i log e la sottodirectory locale
     log_dir_name: "logs_{{ ansible_date_time.iso8601_basic | replace('T', '-') | replace(':', '-') | replace('Z', '') }}"
     # Percorsi remoti
