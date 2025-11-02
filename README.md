@@ -79,23 +79,25 @@ Questa fase viene eseguita direttamente sulla console KVM/VNC del tuo VPS, poich
 
 Dopo aver completato la Fase 0, puoi procedere con la diagnostica automatica dal tuo Control Node.
 
-    ```bash
-    # 1. Caricamento robusto delle variabili dal file .env
-    while IFS='=' read -r key value; do
-        key=$(echo "$key" | xargs)
-        if [[ ! -z "$key" && "$key" != \#* ]]; then
-            export "$key"="$value"
-        fi
-    done < .env
+```bash
+
+# 1. Caricamento robusto delle variabili dal file .env
+while IFS='=' read -r key value; do
+    key=$(echo "$key" | xargs)
+    if [[ ! -z "$key" && "$key" != \#* ]]; then
+        export "$key"="$value"
+    fi
+done < .env
+
+# 2. Esecuzione Ansible
+# Passiamo l'IP e tutte le credenziali, PIÙ la partizione target
+ansible-playbook -i "$REMOTE_IP," ansible/diagnose_playbook.yml \
+    -e "ansible_user=tempuser" \
+    -e "ansible_password=$BOOTSTRAP_PASSWORD" \
+    -e "ansible_become_pass=$BOOTSTRAP_PASSWORD" \
+    -e "target_partition=/dev/vda1" # <-- DA AGGIORNARE!!!
     
-    # 2. Esecuzione Ansible
-    # Passiamo l'IP e tutte le credenziali, PIÙ la partizione target
-    ansible-playbook -i "$REMOTE_IP," ansible/diagnose_playbook.yml \
-        -e "ansible_user=tempuser" \
-        -e "ansible_password=$BOOTSTRAP_PASSWORD" \
-        -e "ansible_become_pass=$BOOTSTRAP_PASSWORD" \
-        -e "target_partition=/dev/vda1" # <-- DA AGGIORNARE!!!
-    ```
+```
 
 ### Risultato della Diagnostica
 
