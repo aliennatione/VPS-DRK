@@ -1,9 +1,8 @@
 ---
 - name: 1. VPS Diagnostica – Acquisizione Log e Stato Disco Condizionale
-  hosts: all 
-  become: true
+    hosts: all 
+    become: true
 
-  # Rimosse le righe relative ad ansible_connection: "{{ ... else omit }}"
 
   vars:
     # Variabili di Setup Essenziali
