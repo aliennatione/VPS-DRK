@@ -82,8 +82,13 @@ Questa fase viene eseguita direttamente sulla console KVM/VNC del tuo VPS, poich
 Questa modalità usa l'SSH e la connessione è la predefinita.
 
 ```bash
-# 1. Carica le variabili d'ambiente (il codice robusto con gestione commenti)
-# ...
+# 1. Carica le variabili d'ambiente (con gestione commenti)
+while IFS='=' read -r key value; do
+    key=$(echo "$key" | xargs)
+    if [[ ! -z "$key" && "$key" != \#* ]]; then
+        export "$key"="$value"
+    fi
+done < .env
 
 # 2. Esegui il playbook, targeting l'IP remoto e passando la partizione
 ansible-playbook -i "$REMOTE_IP," ansible/diagnose_playbook.yml \
