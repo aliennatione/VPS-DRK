@@ -79,27 +79,22 @@ Questa fase viene eseguita direttamente sulla console KVM/VNC del tuo VPS, poich
 
 Dopo aver completato la Fase 0, puoi procedere con la diagnostica automatica dal tuo Control Node.
 
-1.  **Carica le Variabili d'Ambiente**:
-    Apri un terminale nella directory radice del progetto ed esporta le variabili dal tuo file `.env` nella sessione corrente. Questo rende `REMOTE_IP` e `BOOTSTRAP_PASSWORD` disponibili per i comandi successivi.
-
     ```bash
+    # 1. Caricamento robusto delle variabili dal file .env
     while IFS='=' read -r key value; do
         key=$(echo "$key" | xargs)
         if [[ ! -z "$key" && "$key" != \#* ]]; then
             export "$key"="$value"
         fi
     done < .env
-    ```
-
-2.  **Esegui il Playbook di Diagnostica**:
-    Lancia il playbook Ansible. Per una maggiore flessibilità e sicurezza, utilizziamo un inventario ad hoc dinamico e passiamo le credenziali via flag `-e`.
-
-    ```bash
+    
+    # 2. Esecuzione Ansible
+    # Passiamo l'IP e tutte le credenziali, PIÙ la partizione target
     ansible-playbook -i "$REMOTE_IP," ansible/diagnose_playbook.yml \
         -e "ansible_user=tempuser" \
         -e "ansible_password=$BOOTSTRAP_PASSWORD" \
         -e "ansible_become_pass=$BOOTSTRAP_PASSWORD" \
-        -e "target_partition=/dev/vda1" # AGGIORNARE!!!
+        -e "target_partition=/dev/vda1" # <-- DA AGGIORNARE!!!
     ```
 
 ### Risultato della Diagnostica
