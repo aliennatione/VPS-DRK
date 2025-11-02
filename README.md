@@ -75,30 +75,34 @@ Questa fase viene eseguita direttamente sulla console KVM/VNC del tuo VPS, poich
     ```
     Questo script configurerà un utente `tempuser` con la password fornita, abiliterà `sudo NOPASSWD` per tale utente, installerà `openssh-server` e altri strumenti necessari per Ansible, e preparerà un mount point per il sistema operativo del VPS bloccato.
 
-### 3. Fase 1: Diagnostica Automatica (Control Node)
+### 3. Fase 1: Diagnostica Automatica
 
-Dopo aver completato la Fase 0, puoi procedere con la diagnostica automatica dal tuo Control Node.
+#### A. Modalità REMOTA (Control Node Separato)
+
+Questa modalità usa l'SSH e la connessione è la predefinita.
 
 ```bash
+# 1. Carica le variabili d'ambiente (il codice robusto con gestione commenti)
+# ...
 
-# 1. Caricamento robusto delle variabili dal file .env
-while IFS='=' read -r key value; do
-    key=$(echo "$key" | xargs)
-    if [[ ! -z "$key" && "$key" != \#* ]]; then
-        export "$key"="$value"
-    fi
-done < .env
-
-# 2. Esecuzione Ansible
-# Passiamo l'IP e tutte le credenziali, PIÙ la partizione target
+# 2. Esegui il playbook, targeting l'IP remoto e passando la partizione
 ansible-playbook -i "$REMOTE_IP," ansible/diagnose_playbook.yml \
     -e "ansible_user=tempuser" \
     -e "ansible_password=$BOOTSTRAP_PASSWORD" \
     -e "ansible_become_pass=$BOOTSTRAP_PASSWORD" \
-    -e "target_partition=/dev/vda1" # <-- DA AGGIORNARE!!!
-    
+    -e "target_partition=/dev/vda1" # <-- Sostituisci con il valore dal bootstrap!
 ```
 
+#### B. Modalità LOCALE (Ansible sulla Live ISO)
+
+Questa modalità attiva la logica `set_fact` per usare la connessione `local`.
+
+```bash
+ansible-playbook -i "localhost," ansible/diagnose_playbook.yml \
+    -e "EXECUTION_MODE=LOCAL" \
+    -e "target_partition=/dev/vda1" \
+    --ask-become-pass # Richiede la password di sudo locale
+```
 ### Risultato della Diagnostica
 
 Al termine dell'esecuzione, il playbook avrà completato i seguenti passaggi:
