@@ -103,23 +103,28 @@
 
     # Task Locale 2: Copia (LOCAL) o Estrazione (REMOTE)
     - name: Handle final log copy/extraction on Control Node
-      ansible.builtin.shell: |
-        # Definisci la directory di output finale
+      ansible.builtin.shell: | # <-- USARE IL SIMBOLO PIPE QUI
+        # Definisci tutte le variabili shell all'inizio per evitare ambiguità
+        EXEC_MODE="{{ EXECUTION_MODE | default('REMOTE') }}"
         FINAL_OUTPUT_DIR="{{ local_download_dir }}/{{ inventory_hostname }}/{{ log_dir_name }}"
+        LOG_DEST="{{ log_dest }}"
+        FETCH_SRC_FILE="{{ local_download_dir }}/{{ inventory_hostname }}/tmp/{{ log_dir_name }}.tar.gz"
+
         mkdir -p "$FINAL_OUTPUT_DIR"
         
-        if [[ "{{ EXECUTION_MODE | default('REMOTE') }}" == "LOCAL" ]]; then
+        if [[ "$EXEC_MODE" == "LOCAL" ]]; then
           # 1. Modalità Locale: Copia diretta da /tmp
-          cp -r "{{ log_dest }}"/* "$FINAL_OUTPUT_DIR/"
+          cp -r "$LOG_DEST"/* "$FINAL_OUTPUT_DIR/"
           
         else
           # 2. Modalità Remota: Estrazione dell'archivio scaricato da fetch
-          
-          # La destinazione del fetch è: {{ local_download_dir }}/{{ inventory_hostname }}/tmp/logs_DATATIME.tar.gz
-          FETCH_SRC_FILE="{{ local_download_dir }}/{{ inventory_hostname }}/tmp/{{ log_dir_name }}.tar.gz"
-          
-          # Estrai i contenuti nella directory finale creata.
-          tar xzf "$FETCH_SRC_FILE" -C "$FINAL_OUTPUT_DIR/" --strip-components=1
+          # Verifica che il file scaricato esista prima di estrarre
+          if [ -f "$FETCH_SRC_FILE" ]; then
+            tar xzf "$FETCH_SRC_FILE" -C "$FINAL_OUTPUT_DIR/" --strip-components=1
+          else
+            echo "ERRORE: Archivio scaricato non trovato in $FETCH_SRC_FILE" >&2
+            exit 1
+          fi
         fi
       delegate_to: localhost
       become: false
