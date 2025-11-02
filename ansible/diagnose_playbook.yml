@@ -3,14 +3,14 @@
   hosts: all 
   become: true
 
-  # Imposta la connessione a 'local' se EXECUTION_MODE è LOCAL. Altrimenti usa SSH (default).
-  vars:
-    ansible_connection: "{{ 'local' if (EXECUTION_MODE | default('REMOTE')) == 'LOCAL' else omit }}"
+  # Rimosse le righe relative ad ansible_connection: "{{ ... else omit }}"
 
-    # 🛑 NUOVE VARIABILI DI SETUP ESSENZIALI (Ora definite qui) 🛑
+  vars:
+    # 🛑 Variabili di Setup Essenziali (Aggiunte per risolvere l'errore 'undefined')
     mount_point: "/mnt/vps"
+    
     # ATTENZIONE: target_partition DEVE essere sovrascritta nel comando di esecuzione
-    target_partition: "/dev/vda1" 
+    target_partition: "/dev/vda1" # Placeholder, da sovrascrivere con -e
 
     # Genera un nome di directory univoco per i log e la sottodirectory locale
     log_dir_name: "logs_{{ ansible_date_time.iso8601_basic | replace('T', '-') | replace(':', '-') | replace('Z', '') }}"
@@ -19,6 +19,13 @@
     tar_file_remote: "/tmp/{{ log_dir_name }}.tar.gz"
     # Percorso locale (Control Node)
     local_download_dir: "./vps_diagnostics_output"
+
+  # 🛑 BLOCCO INIZIALE PER LA MODALITÀ LOCALE 🛑
+  pre_tasks:
+    - name: Set connection to local if EXECUTION_MODE is LOCAL
+      ansible.builtin.set_fact:
+        ansible_connection: local
+      when: (EXECUTION_MODE | default('REMOTE')) == 'LOCAL'
 
   tasks:
     # 1. SETUP REMOTO E MOUNT (Sola Lettura)
