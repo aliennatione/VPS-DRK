@@ -84,7 +84,8 @@ Dopo aver completato la Fase 0, puoi procedere con la diagnostica automatica dal
 
     ```bash
     while IFS='=' read -r key value; do
-        if [[ ! -z "$key" ]]; then
+        key=$(echo "$key" | xargs)
+        if [[ ! -z "$key" && "$key" != \#* ]]; then
             export "$key"="$value"
         fi
     done < .env
@@ -97,7 +98,8 @@ Dopo aver completato la Fase 0, puoi procedere con la diagnostica automatica dal
     ansible-playbook -i "$REMOTE_IP," ansible/diagnose_playbook.yml \
         -e "ansible_user=tempuser" \
         -e "ansible_password=$BOOTSTRAP_PASSWORD" \
-        -e "ansible_become_pass=$BOOTSTRAP_PASSWORD"
+        -e "ansible_become_pass=$BOOTSTRAP_PASSWORD" \
+        -e "target_partition=/dev/vda1" # AGGIORNARE!!!
     ```
 
 ### Risultato della Diagnostica
