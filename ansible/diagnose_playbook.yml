@@ -83,9 +83,12 @@
     - name: Download log archive to Control Node
       ansible.builtin.fetch:
         src: "{{ tar_file_remote }}"
-        dest: "{{ local_download_dir }}/"
-        flat: yes
+        # Usa un percorso assoluto per la destinazione locale
+        dest: "{{ local_download_dir }}/" 
+        # NON usare 'flat: yes'. Permette a fetch di creare la directory host IP/
+        flat: no 
       register: fetch_result
+      when: (EXECUTION_MODE | default('REMOTE')) == 'REMOTE'
 
     # Task Locale 1: Crea la directory locale di destinazione
     - name: Ensure local log directory exists
@@ -96,18 +99,30 @@
       delegate_to: localhost
       become: false
 
-    # Task Locale 2: Estrae l'archivio
-    - name: Extract log archive on Control Node
-      ansible.builtin.unarchive:
-        src: "{{ fetch_result.dest }}"
-        dest: "{{ local_download_dir }}/{{ log_dir_name }}/" 
-        remote_src: no
-        extra_opts:
-          - '--strip-components=1'
+    # Task Locale 2: Copia (LOCAL) o Estrazione (REMOTE)
+    - name: Handle final log copy/extraction on Control Node
+      ansible.builtin.shell: |
+        # Definisci la directory di output finale
+        FINAL_OUTPUT_DIR="{{ local_download_dir }}/{{ inventory_hostname }}/{{ log_dir_name }}"
+        mkdir -p "$FINAL_OUTPUT_DIR"
+        
+        if [[ "{{ EXECUTION_MODE | default('REMOTE') }}" == "LOCAL" ]]; then
+          # 1. Modalità Locale: Copia diretta da /tmp
+          cp -r "{{ log_dest }}"/* "$FINAL_OUTPUT_DIR/"
+          
+        else
+          # 2. Modalità Remota: Estrazione dell'archivio scaricato da fetch
+          
+          # La destinazione del fetch è: {{ local_download_dir }}/{{ inventory_hostname }}/tmp/logs_DATATIME.tar.gz
+          FETCH_SRC_FILE="{{ local_download_dir }}/{{ inventory_hostname }}/tmp/{{ log_dir_name }}.tar.gz"
+          
+          # Estrai i contenuti nella directory finale creata.
+          tar xzf "$FETCH_SRC_FILE" -C "$FINAL_OUTPUT_DIR/" --strip-components=1
+        fi
       delegate_to: localhost
-      when: fetch_result.changed
-      become: false 
+      become: false
+      # Questo task non ha bisogno della condizione when, gestisce la logica internamente
 
-    - name: Print success message with local download path
+    - name: Print success message with final output path
       ansible.builtin.debug:
-        msg: "✅ DIAGNOSTICA COMPLETATA. Log scaricati ed estratti sul Control Node in: {{ local_download_dir }}/{{ log_dir_name }}/{{ inventory_hostname }}/"
+        msg: "✅ DIAGNOSTICA COMPLETATA. Log salvati in: {{ local_download_dir }}/{{ inventory_hostname }}/{{ log_dir_name }}/"
