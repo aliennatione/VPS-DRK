@@ -12,10 +12,10 @@
     # ATTENZIONE: target_partition DEVE essere sovrascritta nel comando di esecuzione
     target_partition: "/dev/vda1" # Placeholder, da sovrascrivere con -e
 
-    ## Percorso locale (Control Node) - Usa percorso assoluto per evitare ambiguità
-    #local_download_dir: "{{ lookup('env', 'PWD') }}/vps_diagnostics_output"
-    # Genera un nome di directory univoco per i log e la sottodirectory locale
-    log_dir_name: "logs_{{ ansible_date_time.iso8601_basic | replace('T', '-') | replace(':', '-') | replace('Z', '') }}"
+    # Percorso locale (Control Node) - Usa percorso assoluto per evitare ambiguità
+    local_download_dir: "{{ lookup('env', 'PWD') }}/vps_diagnostics_output"
+    ## Genera un nome di directory univoco per i log e la sottodirectory locale
+    #log_dir_name: "logs_{{ ansible_date_time.iso8601_basic | replace('T', '-') | replace(':', '-') | replace('Z', '') }}"
     # Percorsi remoti
     log_dest: "/tmp/{{ log_dir_name }}"
     tar_file_remote: "/tmp/{{ log_dir_name }}.tar.gz"
