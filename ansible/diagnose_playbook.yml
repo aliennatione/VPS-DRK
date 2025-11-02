@@ -1,136 +1,112 @@
 ---
 - name: 1. VPS Diagnostica – Acquisizione Log e Stato Disco Condizionale
-    hosts: all 
-    become: true
+  hosts: all
+  become: true
 
+  vars:
+    mount_point: "/mnt/vps"
+    target_partition: "/dev/vda1"
+    log_dir_name: "logs_{{ ansible_date_time.iso8601_basic | replace('T', '-') | replace(':', '-') | replace('Z', '') }}"
+    log_dest: "/tmp/{{ log_dir_name }}"
+    tar_file_remote: "/tmp/{{ log_dir_name }}.tar.gz"
+    local_download_dir: "{{ lookup('env', 'PWD') }}/vps_diagnostics_output"
 
-  vars:
-    # Variabili di Setup Essenziali
-    mount_point: "/mnt/vps"
-    target_partition: "/dev/vda1" # Placeholder, da sovrascrivere con -e
+  pre_tasks:
+    - name: Set connection to local if EXECUTION_MODE is LOCAL
+      ansible.builtin.set_fact:
+        ansible_connection: local
+      when: (EXECUTION_MODE | default('REMOTE')) == 'LOCAL'
 
+  tasks:
+    - name: Create temporary mount point directory on Live ISO
+      ansible.builtin.file:
+        path: "{{ mount_point }}"
+        state: directory
+        mode: '0755'
 
-    # 1. Definisce il nome della directory temporanea (basato sulla data/ora)
-    log_dir_name: "logs_{{ ansible_date_time.iso8601_basic | replace('T', '-') | replace(':', '-') | replace('Z', '') }}"
-    
-    # 2. Definisce il percorso remoto completo (/tmp/logs_DATA...)
-    log_dest: "/tmp/{{ log_dir_name }}"
-    
-    # 3. Definisce il nome dell'archivio remoto
-    tar_file_remote: "/tmp/{{ log_dir_name }}.tar.gz"
-    
-    # 4. Definisce il percorso di download locale (Control Node)
-    # Usa il percorso assoluto per evitare ambiguità (risolve il problema precedente)
-    local_download_dir: "{{ lookup('env', 'PWD') }}/vps_diagnostics_output"
-   
-  # 🛑 BLOCCO INIZIALE PER LA MODALITÀ LOCALE 🛑
-  pre_tasks:
-    - name: Set connection to local if EXECUTION_MODE is LOCAL
-      ansible.builtin.set_fact:
-        ansible_connection: local
-      when: (EXECUTION_MODE | default('REMOTE')) == 'LOCAL'
+    - name: Mount target partition READONLY (Safety Check)
+      ansible.posix.mount:
+        path: "{{ mount_point }}"
+        src: "{{ target_partition }}"
+        fstype: auto
+        opts: ro
+        state: mounted
 
-  tasks:
-    # 1. SETUP REMOTO E MOUNT (Sola Lettura)
-    - name: Create temporary mount point directory on Live ISO
-      ansible.builtin.file:
-        path: "{{ mount_point }}"
-        state: directory
-        mode: '0755'
+    - name: Create log destination directory on Live ISO's /tmp
+      ansible.builtin.file:
+        path: "{{ log_dest }}"
+        state: directory
+        mode: '0755'
 
-    - name: Mount target partition READONLY (Safety Check)
-      ansible.posix.mount:
-        path: "{{ mount_point }}"
-        src: "{{ target_partition }}"
-        fstype: auto
-        opts: ro
-        state: mounted
+    - name: Run complex diagnostic steps (Journal, Disk Check, Bind Mounts)
+      ansible.builtin.shell: |
+        set +e
+        mkdir -p "{{ mount_point }}/proc" "{{ mount_point }}/sys"
+        mount -o bind /proc "{{ mount_point }}/proc"
+        mount -o bind /sys "{{ mount_point }}/sys"
 
-    - name: Create log destination directory on Live ISO's /tmp
-      ansible.builtin.file:
-        path: "{{ log_dest }}"
-        state: directory
-        mode: '0755'
+        echo "--- LOG JOURNAL (LAST 500) ---" > "{{ log_dest }}/target_journal_last500.txt"
+        chroot "{{ mount_point }}" journalctl -r -n 500 --no-pager >> "{{ log_dest }}/target_journal_last500.txt" 2>&1
 
-    # 2. RUN DIAGNOSTICS (Journal, Disk Check, Bind Mounts)
-    - name: Run complex diagnostic steps (Journal, Disk Check, Bind Mounts)
-      ansible.builtin.shell: |
-        set +e
-        mkdir -p "{{ mount_point }}/proc" "{{ mount_point }}/sys"
-        mount -o bind /proc "{{ mount_point }}/proc"
-        mount -o bind /sys "{{ mount_point }}/sys"
+        echo -e "\n--- RAPPORTO UTILIZZO DISCO (df -h) ---" > "{{ log_dest }}/target_disk_usage.txt"
+        chroot "{{ mount_point }}" df -h >> "{{ log_dest }}/target_disk_usage.txt" 2>&1
 
-        echo "--- LOG JOURNAL (LAST 500) ---" > "{{ log_dest }}/target_journal_last500.txt"
-        chroot "{{ mount_point }}" journalctl -r -n 500 --no-pager >> "{{ log_dest }}/target_journal_last500.txt" 2>&1
-        
-        echo -e "\n--- RAPPORTO UTILIZZO DISCO (df -h) ---" > "{{ log_dest }}/target_disk_usage.txt"
-        chroot "{{ mount_point }}" df -h >> "{{ log_dest }}/target_disk_usage.txt" 2>&1
+        cp "{{ mount_point }}/var/log/syslog" "{{ log_dest }}/target_syslog_copy" || true
 
-        cp "{{ mount_point }}/var/log/syslog" "{{ log_dest }}/target_syslog_copy" || true 
+        umount "{{ mount_point }}/sys"
+        umount "{{ mount_point }}/proc"
+      args:
+        executable: /bin/bash
+      ignore_errors: yes
 
-        umount "{{ mount_point }}/sys"
-        umount "{{ mount_point }}/proc"
-      args:
-        executable: /bin/bash
-      ignore_errors: yes
+    - name: Unmount target partition
+      ansible.posix.mount:
+        path: "{{ mount_point }}"
+        state: absent
 
-    # 3. CLEANUP AND DOWNLOAD (AUTOMAZIONE)
-    - name: Unmount target partition
-      ansible.posix.mount:
-        path: "{{ mount_point }}"
-        state: absent
+    - name: Archive log directory before download
+      ansible.builtin.shell: tar czf "{{ tar_file_remote }}" -C /tmp "{{ log_dir_name }}"
 
-    - name: Archive log directory before download
-      ansible.builtin.shell: tar czf "{{ tar_file_remote }}" -C /tmp "{{ log_dir_name }}"
+    - name: Download log archive to Control Node
+      ansible.builtin.fetch:
+        src: "{{ tar_file_remote }}"
+        dest: "{{ local_download_dir }}/"
+        flat: no
+      register: fetch_result
+      when: (EXECUTION_MODE | default('REMOTE')) == 'REMOTE'
 
-    - name: Download log archive to Control Node
-      ansible.builtin.fetch:
-        src: "{{ tar_file_remote }}"
-        # Usa un percorso assoluto per la destinazione locale
-        dest: "{{ local_download_dir }}/" 
-        # NON usare 'flat: yes'. Permette a fetch di creare la directory host IP/
-        flat: no 
-      register: fetch_result
-      when: (EXECUTION_MODE | default('REMOTE')) == 'REMOTE'
+    - name: Ensure local log directory exists
+      ansible.builtin.file:
+        path: "{{ local_download_dir }}/{{ log_dir_name }}"
+        state: directory
+        mode: '0700'
+      delegate_to: localhost
+      become: false
+      run_once: true
 
-    # Task Locale 1: Crea la directory locale di destinazione
-    - name: Ensure local log directory exists
-      ansible.builtin.file:
-        path: "{{ local_download_dir }}/{{ log_dir_name }}"
-        state: directory
-        mode: '0700'
-      delegate_to: localhost
-      become: false
+    - name: Handle final log copy/extraction on Control Node
+      ansible.builtin.shell: |
+        EXEC_MODE="{{ EXECUTION_MODE | default('REMOTE') }}"
+        FINAL_OUTPUT_DIR="{{ local_download_dir }}/{{ inventory_hostname }}/{{ log_dir_name }}"
+        LOG_DEST="{{ log_dest }}"
+        FETCH_SRC_FILE="{{ local_download_dir }}/{{ inventory_hostname }}/tmp/{{ log_dir_name }}.tar.gz"
 
-    # Task Locale 2: Copia (LOCAL) o Estrazione (REMOTE)
-    - name: Handle final log copy/extraction on Control Node
-      ansible.builtin.shell: | # <-- USARE IL SIMBOLO PIPE QUI
-        # Definisci tutte le variabili shell all'inizio per evitare ambiguità
-        EXEC_MODE="{{ EXECUTION_MODE | default('REMOTE') }}"
-        FINAL_OUTPUT_DIR="{{ local_download_dir }}/{{ inventory_hostname }}/{{ log_dir_name }}"
-        LOG_DEST="{{ log_dest }}"
-        FETCH_SRC_FILE="{{ local_download_dir }}/{{ inventory_hostname }}/tmp/{{ log_dir_name }}.tar.gz"
+        mkdir -p "$FINAL_OUTPUT_DIR"
 
-        mkdir -p "$FINAL_OUTPUT_DIR"
-        
-        if [[ "$EXEC_MODE" == "LOCAL" ]]; then
-          # 1. Modalità Locale: Copia diretta da /tmp
-          cp -r "$LOG_DEST"/* "$FINAL_OUTPUT_DIR/"
-          
-        else
-          # 2. Modalità Remota: Estrazione dell'archivio scaricato da fetch
-          # Verifica che il file scaricato esista prima di estrarre
-          if [ -f "$FETCH_SRC_FILE" ]; then
-            tar xzf "$FETCH_SRC_FILE" -C "$FINAL_OUTPUT_DIR/" --strip-components=1
-          else
-            echo "ERRORE: Archivio scaricato non trovato in $FETCH_SRC_FILE" >&2
-            exit 1
-          fi
-        fi
-      delegate_to: localhost
-      become: false
-      # Questo task non ha bisogno della condizione when, gestisce la logica internamente
+        if [[ "$EXEC_MODE" == "LOCAL" ]]; then
+          cp -r "$LOG_DEST"/* "$FINAL_OUTPUT_DIR/"
+        else
+          if [ -f "$FETCH_SRC_FILE" ]; then
+            tar xzf "$FETCH_SRC_FILE" -C "$FINAL_OUTPUT_DIR/" --strip-components=1
+          else
+            echo "ERRORE: Archivio scaricato non trovato in $FETCH_SRC_FILE" >&2
+            exit 1
+          fi
+        fi
+      delegate_to: localhost
+      become: false
+      run_once: true
 
-    - name: Print success message with final output path
-      ansible.builtin.debug:
-        msg: "✅ DIAGNOSTICA COMPLETATA. Log salvati in: {{ local_download_dir }}/{{ inventory_hostname }}/{{ log_dir_name }}/"
+    - name: Print success message with final output path
+      ansible.builtin.debug:
+        msg: "✅ DIAGNOSTICA COMPLETATA. Log salvati in: {{ local_download_dir }}/{{ inventory_hostname }}/{{ log_dir_name }}/"
